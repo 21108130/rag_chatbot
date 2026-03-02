@@ -36,16 +36,14 @@ class ChromaVectorStore:
         return self._collection
 
     def _create_client(self):
-        try:
-            import chromadb
-        except ImportError:
-            raise ImportError("chromadb is not installed. Run: pip install chromadb")
-
-        logger.info(f"Connecting to ChromaDB at: {self.persist_dir}")
-
-        # chromadb >= 0.5.0 removed Settings import — use PersistentClient directly
-        client = chromadb.PersistentClient(path=self.persist_dir)
-        return client
+    try:
+        import chromadb
+    except ImportError:
+        raise ImportError("chromadb is not installed.")
+    
+    logger.info(f"Connecting to ChromaDB at: {self.persist_dir}")
+    client = chromadb.PersistentClient(path=self.persist_dir)
+    return client
 
     def _get_or_create_collection(self):
         collection = self.client.get_or_create_collection(

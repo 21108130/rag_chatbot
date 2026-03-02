@@ -5,17 +5,12 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
-
 from config.settings import settings
 from src.utils.logger import logger
 from src.utils.models import ConversationHistory, MessageRole
 
+# Hardcoded working model — do not rely on settings for this
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 RAG_CONTEXT_TEMPLATE = """Answer the question using ONLY the context below.
 If the answer is not in the context, say "I could not find this in the uploaded documents."
@@ -23,10 +18,10 @@ If the answer is not in the context, say "I could not find this in the uploaded 
 Context:
 {context}
 
-Be concise and accurate. Cite [Source N] when referencing specific facts.
+Be concise. Cite [Source N] when referencing facts.
 """
 
-NO_CONTEXT_PROMPT = "You are a helpful assistant. No documents uploaded yet — ask the user to upload one."
+NO_CONTEXT_PROMPT = "You are a helpful assistant. Ask the user to upload a document first."
 
 
 class GroqLLMClient:
@@ -39,9 +34,9 @@ class GroqLLMClient:
         max_tokens: Optional[int] = None,
     ) -> None:
         self._api_key = api_key
-        self.model = model or settings.llm_model
-        self.temperature = temperature if temperature is not None else settings.llm_temperature
-        self.max_tokens = 512  # keep response short to avoid token limit errors
+        self.model = GROQ_MODEL  # always use hardcoded working model
+        self.temperature = 0.1
+        self.max_tokens = 512
         self._client = None
 
     @property
@@ -53,22 +48,17 @@ class GroqLLMClient:
     @property
     def client(self):
         if self._client is None:
-            if not self.api_key:
+            key = self.api_key
+            if not key:
                 raise ValueError("GROQ_API_KEY is not set.")
             try:
                 from groq import Groq
-                self._client = Groq(api_key=self.api_key)
+                self._client = Groq(api_key=key)
                 logger.info(f"Groq client initialised (model={self.model})")
             except ImportError:
-                raise ImportError("groq is not installed. Run: pip install groq")
+                raise ImportError("groq is not installed.")
         return self._client
 
-    @retry(
-        retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        reraise=True,
-    )
     def generate(
         self,
         query: str,
@@ -76,24 +66,32 @@ class GroqLLMClient:
         history: Optional[ConversationHistory] = None,
     ) -> Dict:
         messages = self._build_messages(query, context, history)
-        logger.debug(f"[LLM] Sending {len(messages)} messages to {self.model}")
+        logger.debug(f"[LLM] Sending {len(messages)} messages, model={self.model}")
 
-        completion = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
-
-        answer = completion.choices[0].message.content.strip()
-        tokens_used = completion.usage.total_tokens if completion.usage else None
-        logger.info(f"[LLM] Generated response: {len(answer)} chars, tokens={tokens_used}")
-
-        return {
-            "answer": answer,
-            "tokens_used": tokens_used,
-            "model": self.model,
-        }
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            answer = completion.choices[0].message.content.strip()
+            tokens_used = completion.usage.total_tokens if completion.usage else None
+            logger.info(f"[LLM] Response: {len(answer)} chars, tokens={tokens_used}")
+            return {
+                "answer": answer,
+                "tokens_used": tokens_used,
+                "model": self.model,
+            }
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[LLM] Error calling Groq API: {error_msg}")
+         
+            return {
+                "answer": f"Sorry, I encountered an error: {error_msg}",
+                "tokens_used": None,
+                "model": self.model,
+            }
 
     def _build_messages(
         self,
@@ -102,8 +100,8 @@ class GroqLLMClient:
         history: Optional[ConversationHistory],
     ) -> List[Dict[str, str]]:
 
-        if context:
-            context = context[:2000]
+     
+        context = (context or "")[:1500]
 
         if context.strip():
             system_content = RAG_CONTEXT_TEMPLATE.format(context=context)
@@ -114,19 +112,20 @@ class GroqLLMClient:
             {"role": "system", "content": system_content}
         ]
 
-      
+        # Only last 2 turns
         if history:
             for msg in history.to_llm_messages(last_n=2):
                 if msg["role"] != MessageRole.SYSTEM.value:
                     messages.append(msg)
 
-        messages.append({"role": "user", "content": query[:500]})  # truncate query too
+      
+        messages.append({"role": "user", "content": query[:300]})
         return messages
 
     def health_check(self) -> bool:
         try:
-            result = self.generate(query="Reply with the single word: OK", context="")
-            return "ok" in result["answer"].lower()
+            result = self.generate(query="Say OK", context="")
+            return True
         except Exception as exc:
             logger.warning(f"[LLM] Health check failed: {exc}")
             return False

@@ -1,9 +1,6 @@
-
-
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
 import numpy as np
 
@@ -13,7 +10,6 @@ from src.utils.models import DocumentChunk, RetrievedChunk
 
 
 class ChromaVectorStore:
-
 
     def __init__(
         self,
@@ -25,7 +21,7 @@ class ChromaVectorStore:
         self._client         = None
         self._collection     = None
 
-
+    # ── Lazy initialisation ────────────────────────────────────────────────────
 
     @property
     def client(self):
@@ -42,15 +38,13 @@ class ChromaVectorStore:
     def _create_client(self):
         try:
             import chromadb
-            from chromadb.config import Settings as ChromaSettings
         except ImportError:
             raise ImportError("chromadb is not installed. Run: pip install chromadb")
 
         logger.info(f"Connecting to ChromaDB at: {self.persist_dir}")
-        client = chromadb.PersistentClient(
-            path=self.persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
+
+        # chromadb >= 0.5.0 removed Settings import — use PersistentClient directly
+        client = chromadb.PersistentClient(path=self.persist_dir)
         return client
 
     def _get_or_create_collection(self):
@@ -64,14 +58,13 @@ class ChromaVectorStore:
         )
         return collection
 
-
+    # ── Write Operations ───────────────────────────────────────────────────────
 
     def add_chunks(
         self,
         chunks: List[DocumentChunk],
         embeddings: List[np.ndarray],
     ) -> int:
-
         if len(chunks) != len(embeddings):
             raise ValueError(
                 f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) "
@@ -80,9 +73,9 @@ class ChromaVectorStore:
         if not chunks:
             return 0
 
-        ids        = [c.chunk_id for c in chunks]
-        documents  = [c.content  for c in chunks]
-        metadatas  = [
+        ids       = [c.chunk_id for c in chunks]
+        documents = [c.content  for c in chunks]
+        metadatas = [
             {
                 **c.metadata,
                 "doc_id":      c.doc_id,
@@ -90,7 +83,7 @@ class ChromaVectorStore:
             }
             for c in chunks
         ]
-        vectors    = [e.tolist() for e in embeddings]
+        vectors = [e.tolist() for e in embeddings]
 
         self.collection.add(
             ids=ids,
@@ -99,13 +92,10 @@ class ChromaVectorStore:
             metadatas=metadatas,
         )
 
-        logger.info(
-            f"Added {len(chunks)} chunks for doc_id={chunks[0].doc_id!r}"
-        )
+        logger.info(f"Added {len(chunks)} chunks for doc_id={chunks[0].doc_id!r}")
         return len(chunks)
 
     def delete_document(self, doc_id: str) -> int:
-
         results = self.collection.get(where={"doc_id": doc_id})
         ids = results.get("ids", [])
 
@@ -117,7 +107,7 @@ class ChromaVectorStore:
 
         return len(ids)
 
-
+    # ── Read / Search Operations ───────────────────────────────────────────────
 
     def similarity_search(
         self,
@@ -125,12 +115,15 @@ class ChromaVectorStore:
         top_k: Optional[int] = None,
         where: Optional[Dict[str, Any]] = None,
     ) -> List[RetrievedChunk]:
-
         k = top_k or settings.top_k_results
+
+        count = self.collection.count()
+        if count == 0:
+            return []
 
         query_kwargs: Dict[str, Any] = {
             "query_embeddings": [query_vector.tolist()],
-            "n_results":        min(k, max(1, self.collection.count())),
+            "n_results":        min(k, count),
             "include":          ["documents", "metadatas", "distances"],
         }
         if where:
@@ -146,7 +139,6 @@ class ChromaVectorStore:
         distances = results.get("distances", [[]])[0]
 
         for chunk_id, doc, meta, dist in zip(ids, documents, metadatas, distances):
-
             similarity = float(1.0 - dist)
 
             if similarity < settings.similarity_threshold:
@@ -168,21 +160,18 @@ class ChromaVectorStore:
         )
         return retrieved
 
-
+    # ── Utility / Stats ────────────────────────────────────────────────────────
 
     def count(self) -> int:
-
         return self.collection.count()
 
     def list_documents(self) -> List[str]:
-
         if self.collection.count() == 0:
             return []
         all_meta = self.collection.get(include=["metadatas"])["metadatas"]
         return list({m.get("doc_id", "") for m in all_meta if m.get("doc_id")})
 
     def get_stats(self) -> Dict[str, Any]:
-
         doc_ids = self.list_documents()
         return {
             "collection":   self.collection_name,
@@ -192,7 +181,6 @@ class ChromaVectorStore:
         }
 
     def reset(self) -> None:
-       
         self.client.delete_collection(self.collection_name)
         self._collection = None
         logger.warning(f"Collection '{self.collection_name}' has been reset.")

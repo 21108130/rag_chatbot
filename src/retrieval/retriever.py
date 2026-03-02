@@ -63,7 +63,7 @@ class Retriever:
             latency_ms = elapsed_ms,
         )
 
-    def format_context(self, result: RetrievalResult, max_chars: int = 6000) -> str:
+    def format_context(self, result: RetrievalResult, max_chars: int = 3000) -> str:
         
         if not result.chunks:
             return ""

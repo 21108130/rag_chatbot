@@ -17,28 +17,16 @@ from src.utils.logger import logger
 from src.utils.models import ConversationHistory, MessageRole
 
 
-SYSTEM_PROMPT = """You are an intelligent assistant that answers questions based strictly on the provided document context.
+RAG_CONTEXT_TEMPLATE = """Answer the question using ONLY the context below.
+If the answer is not in the context, say "I could not find this in the uploaded documents."
 
-Guidelines:
-- Answer ONLY using information from the context below.
-- If the context does not contain enough information, say so clearly.
-- Be concise, accurate, and helpful.
-- Cite the source reference (e.g. "[Source 1]") when referencing specific facts.
-- Do not fabricate information or reference external knowledge not in the context.
-"""
-
-RAG_CONTEXT_TEMPLATE = """{system_prompt}
-
-Retrieved Context:
+Context:
 {context}
 
-Answer the user's question based on the context above.
-If you cannot find the answer in the context, say: "I could not find relevant information in the uploaded documents."
+Be concise and accurate. Cite [Source N] when referencing specific facts.
 """
 
-NO_CONTEXT_PROMPT = """You are a helpful AI assistant.
-No documents have been uploaded yet. Let the user know they should upload documents first.
-"""
+NO_CONTEXT_PROMPT = "You are a helpful assistant. No documents uploaded yet — ask the user to upload one."
 
 
 class GroqLLMClient:
@@ -53,7 +41,7 @@ class GroqLLMClient:
         self._api_key = api_key
         self.model = model or settings.llm_model
         self.temperature = temperature if temperature is not None else settings.llm_temperature
-        self.max_tokens = max_tokens or settings.llm_max_tokens
+        self.max_tokens = 512  # keep response short to avoid token limit errors
         self._client = None
 
     @property
@@ -113,11 +101,12 @@ class GroqLLMClient:
         context: str,
         history: Optional[ConversationHistory],
     ) -> List[Dict[str, str]]:
+
+        if context:
+            context = context[:2000]
+
         if context.strip():
-            system_content = RAG_CONTEXT_TEMPLATE.format(
-                system_prompt=SYSTEM_PROMPT,
-                context=context,
-            )
+            system_content = RAG_CONTEXT_TEMPLATE.format(context=context)
         else:
             system_content = NO_CONTEXT_PROMPT
 
@@ -125,12 +114,13 @@ class GroqLLMClient:
             {"role": "system", "content": system_content}
         ]
 
+      
         if history:
-            for msg in history.to_llm_messages(last_n=4):
+            for msg in history.to_llm_messages(last_n=2):
                 if msg["role"] != MessageRole.SYSTEM.value:
                     messages.append(msg)
 
-        messages.append({"role": "user", "content": query})
+        messages.append({"role": "user", "content": query[:500]})  # truncate query too
         return messages
 
     def health_check(self) -> bool:

@@ -1,4 +1,5 @@
 
+
 from __future__ import annotations
 
 import time
@@ -13,36 +14,30 @@ from src.vectordb.chroma_store import ChromaVectorStore
 
 class Retriever:
 
-
     def __init__(
         self,
-        vector_store: Optional[ChromaVectorStore]  = None,
-        embedder:     Optional[EmbeddingGenerator] = None,
+        vector_store: Optional[ChromaVectorStore] = None,
+        embedder: Optional[EmbeddingGenerator] = None,
     ) -> None:
         self.vector_store = vector_store or ChromaVectorStore()
-        self.embedder     = embedder     or get_embedder()
-
-
+        self.embedder = embedder or get_embedder()
 
     def retrieve(
         self,
         query: str,
         top_k: Optional[int] = None,
     ) -> RetrievalResult:
-
         if not query or not query.strip():
             logger.warning("[Retriever] Empty query received.")
             return RetrievalResult(query=query, chunks=[], latency_ms=0.0)
 
         if self.vector_store.count() == 0:
-            logger.warning("[Retriever] Vector store is empty — no documents indexed.")
+            logger.warning("[Retriever] Vector store is empty.")
             return RetrievalResult(query=query, chunks=[], latency_ms=0.0)
 
         start = time.perf_counter()
 
-
         query_vector = self.embedder.embed_query(query)
-
 
         k = top_k or settings.top_k_results
         chunks = self.vector_store.similarity_search(
@@ -53,17 +48,17 @@ class Retriever:
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         logger.info(
-            f"[Retriever] Query: '{query[:60]}…' → "
+            f"[Retriever] Query: '{query[:60]}' → "
             f"{len(chunks)} chunks in {elapsed_ms:.1f}ms"
         )
 
         return RetrievalResult(
-            query      = query,
-            chunks     = chunks,
-            latency_ms = elapsed_ms,
+            query=query,
+            chunks=chunks,
+            latency_ms=elapsed_ms,
         )
 
-    def format_context(self, result: RetrievalResult, max_chars: int = 3000) -> str:
+    def format_context(self, result: RetrievalResult, max_chars: int = 2000) -> str:
         
         if not result.chunks:
             return ""
@@ -72,15 +67,16 @@ class Retriever:
         total = 0
 
         for i, chunk in enumerate(result.chunks, 1):
-            source   = chunk.metadata.get("source", chunk.doc_id)
-            section  = f"[Source {i}: {source} | similarity={chunk.similarity_score:.2f}]"
-            block    = f"{section}\n{chunk.content}"
+            source = chunk.metadata.get("source", chunk.doc_id)
+            
+            content = chunk.content[:400]
+            block = f"[Source {i}: {source}]\n{content}"
             block_len = len(block)
 
             if total + block_len > max_chars:
                 remaining = max_chars - total
                 if remaining > 100:
-                    parts.append(block[:remaining] + " …[truncated]")
+                    parts.append(block[:remaining])
                 break
 
             parts.append(block)

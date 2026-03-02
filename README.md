@@ -58,7 +58,7 @@ ChatResponse                ← answer + sources + latency
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/yourname/rag-chatbot.git
+https://github.com/21108130/rag_chatbot
 cd rag-chatbot
 make install
 ```

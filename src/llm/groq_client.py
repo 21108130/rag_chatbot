@@ -126,7 +126,7 @@ class GroqLLMClient:
         ]
 
         if history:
-            for msg in history.to_llm_messages(last_n=8):
+            for msg in history.to_llm_messages(last_n=4):
                 if msg["role"] != MessageRole.SYSTEM.value:
                     messages.append(msg)
 
